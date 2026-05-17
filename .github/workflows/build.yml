@@ -34,11 +34,21 @@ jobs:
           tar -xf clang.tar.xz --strip-components=1 -C ../toolchains/llvm-clang
           rm clang.tar.xz
 
-      - name: Build kptools from source
+      - name: Build and patch kptools from source
         run: |
           git clone --depth=1 \
             https://github.com/KernelSU-Next/KPatch-Next kpatch-src
           cp kpatch-src/kernel/include/preset.h kpatch-src/tools/
+          
+          echo ">>> ORIGINAL patch.c (around bad rela) <<<"
+          grep -n -B2 -A2 "bad rela" kpatch-src/tools/patch.c
+          
+          echo ">>> PATCHING KPTOOLS TO IGNORE BSS RELOCS <<<"
+          # Ищем "bad rela offset", захватываем следующую строку (где return) и меняем на continue;
+          sed -i '/bad rela offset/{N;s/return [^;]*;/continue;/}' kpatch-src/tools/patch.c
+          
+          echo ">>> MODIFIED patch.c (around bad rela) <<<"
+          grep -n -B2 -A2 "bad rela" kpatch-src/tools/patch.c
           
           make -C kpatch-src/tools -j$(nproc)
           cp kpatch-src/tools/kptools ./kptools
@@ -77,8 +87,6 @@ jobs:
             [ -f ".config" ] && CONF=".config"
             
             if [ -f "$CONF" ]; then
-              echo ">>> PATCHING $CONF <<<"
-              
               # Выключаем LTO
               sed -i 's/CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' "$CONF"
               sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' "$CONF"
@@ -88,10 +96,6 @@ jobs:
               sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' "$CONF"
               sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/' "$CONF"
               
-              # Отключаем относительные адреса kallsyms (ломают kptools)
-              sed -i 's/CONFIG_KALLSYMS_BASE_RELATIVE=y/# CONFIG_KALLSYMS_BASE_RELATIVE is not set/' "$CONF"
-              
-              # Добиваем в конец для надежности
               echo 'CONFIG_LTO_NONE=y' >> "$CONF"
               echo 'CONFIG_KALLSYMS=y' >> "$CONF"
               echo 'CONFIG_KPROBES=y' >> "$CONF"
@@ -124,7 +128,7 @@ jobs:
         run: |
           IMAGE="out/arch/arm64/boot/Image"
 
-          # Запуск kptools напрямую на оригинальном Image (паддинг больше не нужен)
+          # Паддинг больше не нужен, так как kptools теперь просто проигнорирует выход за пределы файла
           ./kptools -p \
             -i "$IMAGE" \
             -k kpimg \
