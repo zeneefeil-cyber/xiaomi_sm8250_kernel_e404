@@ -70,9 +70,7 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/bin
           cat << 'EOF' > $GITHUB_WORKSPACE/bin/make
           #!/bin/bash
-          # Если это генерация конфига (и не валидация olddefconfig)
           if [[ "$*" == *"defconfig"* && "$*" != *"olddefconfig"* ]]; then
-            # 1. Генерируем дефолтный конфиг
             /usr/bin/make "$@"
             
             CONF="out/.config"
@@ -81,22 +79,23 @@ jobs:
             if [ -f "$CONF" ]; then
               echo ">>> PATCHING $CONF <<<"
               
-              # 2. Выключаем LTO
+              # Выключаем LTO
               sed -i 's/CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' "$CONF"
               sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' "$CONF"
               sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' "$CONF"
               
-              # 3. Включаем KALLSYMS и KPROBES
+              # Включаем KALLSYMS и KPROBES
               sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' "$CONF"
               sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/' "$CONF"
               
-              # Добиваем в конец для верности
+              # Отключаем относительные адреса kallsyms (ломают kptools)
+              sed -i 's/CONFIG_KALLSYMS_BASE_RELATIVE=y/# CONFIG_KALLSYMS_BASE_RELATIVE is not set/' "$CONF"
+              
+              # Добиваем в конец для надежности
               echo 'CONFIG_LTO_NONE=y' >> "$CONF"
               echo 'CONFIG_KALLSYMS=y' >> "$CONF"
-              echo 'CONFIG_KALLSYMS_ALL=y' >> "$CONF"
               echo 'CONFIG_KPROBES=y' >> "$CONF"
               
-              # 4. УБИРАЕМ alioth_defconfig из аргументов, чтобы не перезаписать файл
               ARGS=()
               for arg in "$@"; do
                 if [[ "$arg" != *"defconfig"* ]]; then
@@ -104,7 +103,6 @@ jobs:
                 fi
               done
               
-              # 5. Валидируем изменённый конфиг
               /usr/bin/make "${ARGS[@]}" olddefconfig
               
               echo ">>> VERIFYING KERNEL CONFIGS <<<"
@@ -112,7 +110,6 @@ jobs:
               echo ">>> END OF VERIFICATION <<<"
             fi
           else
-            # Обычная сборка ядра
             /usr/bin/make "$@"
           fi
           EOF
@@ -126,23 +123,10 @@ jobs:
       - name: Patch kernel Image with KPM
         run: |
           IMAGE="out/arch/arm64/boot/Image"
-          cp "$IMAGE" "${IMAGE}.ori"
 
-          KERNEL_SIZE=$(python3 -c "
-          import struct
-          with open('${IMAGE}.ori', 'rb') as f:
-              f.seek(16)
-              print(struct.unpack('<Q', f.read(8))[0])
-          ")
-          
-          echo "Virtual size extracted: $KERNEL_SIZE"
-
-          # Padding Image до kernel_size
-          cp "${IMAGE}.ori" "${IMAGE}.padded"
-          truncate -s "$KERNEL_SIZE" "${IMAGE}.padded"
-
+          # Запуск kptools напрямую на оригинальном Image (паддинг больше не нужен)
           ./kptools -p \
-            -i "${IMAGE}.padded" \
+            -i "$IMAGE" \
             -k kpimg \
             -o "${IMAGE}.patched" \
             -M ci/ditpro.kpm \
