@@ -18,14 +18,11 @@ jobs:
         run: |
           DEFCONFIG="arch/arm64/configs/vendor/alioth_defconfig"
 
-          # KALLSYMS
           sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y\nCONFIG_KALLSYMS_ALL=y/' "$DEFCONFIG"
           grep -q 'CONFIG_KALLSYMS_ALL' "$DEFCONFIG" || echo 'CONFIG_KALLSYMS_ALL=y' >> "$DEFCONFIG"
-
-          # Только KASLR убираем — LTO и RELOCATABLE оставляем как есть
           sed -i 's/CONFIG_RANDOMIZE_BASE=y/# CONFIG_RANDOMIZE_BASE is not set/' "$DEFCONFIG"
 
-          grep -E 'KALLSYMS|RANDOMIZE_BASE|RELOCATABLE|LTO' "$DEFCONFIG"
+          grep -E 'KALLSYMS|RANDOMIZE_BASE|RELOCATABLE' "$DEFCONFIG"
 
       - name: Install dependencies
         run: |
@@ -35,17 +32,19 @@ jobs:
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
+      - name: Install LLVM 18
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm.sh | sudo bash -s -- 18
+          mkdir -p ../toolchains/llvm-clang/bin
+          for tool in clang clang++ lld ld.lld llvm-ar llvm-nm \
+                      llvm-objcopy llvm-objdump llvm-strip llvm-as; do
+            BIN=$(command -v ${tool}-18 2>/dev/null)
+            [ -n "$BIN" ] && ln -sf "$BIN" ../toolchains/llvm-clang/bin/${tool}
+          done
+          ../toolchains/llvm-clang/bin/clang --version
+
       - name: Clone AnyKernel3
         run: git clone --depth=1 https://github.com/kvsnr113/AnyKernel3 ../AnyKernel3
-
-      - name: Download LLVM 22.1.4
-        run: |
-          mkdir -p ../toolchains/llvm-clang
-          curl -Lo clang.tar.xz \
-            https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.4/LLVM-22.1.4-Linux-X64.tar.xz
-          tar -xf clang.tar.xz --strip-components=1 -C ../toolchains/llvm-clang
-          rm clang.tar.xz
-          ../toolchains/llvm-clang/bin/clang --version
 
       - name: Create Telegram config
         run: |
