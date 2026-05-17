@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
-            python3 zip curl make ccache \
+            python3 zip curl make ccache cmake build-essential \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
@@ -47,13 +47,40 @@ jobs:
           tar -xf clang.tar.xz --strip-components=1 -C ../toolchains/llvm-clang
           rm clang.tar.xz
 
-      - name: Download kptools and kpimg
+      - name: Build patched kptools from source
         run: |
-          BASE="https://github.com/KernelSU-Next/KPatch-Next/releases/download/0.13.5-2"
-          curl -Lo kptools "${BASE}/kptools-linux"
-          curl -Lo kpimg  "${BASE}/kpimg-linux"
+          git clone --depth=1 \
+            https://github.com/KernelSU-Next/KPatch-Next kpatch-src
+
+          # Патч: заменяем проверку границ image_size → kernel_size
+          # чтобы BSS-записи в rela таблице не пропускались
+          grep -n "bad rela offset\|image_size" kpatch-src/tools/patch.c | head -20
+
+          sed -i 's/kimg->image_size/kimg->kernel_size/g' kpatch-src/tools/patch.c
+
+          echo "--- Patched lines ---"
+          grep -n "kernel_size\|image_size" kpatch-src/tools/patch.c | head -20
+
+          # Сборка
+          cd kpatch-src
+          if [ -f CMakeLists.txt ]; then
+            cmake -B build -DCMAKE_BUILD_TYPE=Release
+            cmake --build build -j$(nproc)
+            find build -name "kptools*" -type f | head -5
+            cp $(find build -name "kptools" -type f | head -1) ../kptools
+          else
+            make -C tools -j$(nproc) || make -j$(nproc)
+            cp kptools ../kptools 2>/dev/null || find . -name "kptools" | head -1 | xargs -I{} cp {} ../kptools
+          fi
+
+          cd ..
           chmod +x kptools
           ./kptools --version
+
+      - name: Download kpimg
+        run: |
+          curl -Lo kpimg \
+            https://github.com/KernelSU-Next/KPatch-Next/releases/download/0.13.5-2/kpimg-linux
 
       - name: Create Telegram config
         run: |
@@ -94,15 +121,14 @@ jobs:
             exit 1
           fi
 
-          # Переупаковываем zip с пропатченным Image
+          # Заменяем Image в AnyKernel3 zip на пропатченный
+          ZIP=$(ls out/RE404-*.zip | head -1)
+          cp "${IMAGE}.patched" "../AnyKernel3/ALIOTH-Image"
           cd ../AnyKernel3
-          cp "${GITHUB_WORKSPACE}/out/arch/arm64/boot/Image.patched" ALIOTH-Image
-          # Заменяем оригинальный Image в уже созданном zip
-          ZIP=$(ls ${GITHUB_WORKSPACE}/out/RE404-*.zip | head -1)
-          zip -u "$ZIP" ALIOTH-Image
+          zip -u "${GITHUB_WORKSPACE}/${ZIP}" ALIOTH-Image
           cd "${GITHUB_WORKSPACE}"
 
-          echo "KPM embedded successfully"
+          echo "KPM embedded OK"
 
       - name: Upload artifact
         if: success()
