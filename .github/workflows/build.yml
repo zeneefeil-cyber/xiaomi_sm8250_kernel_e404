@@ -14,12 +14,17 @@ jobs:
           fetch-depth: 1
           submodules: true
 
-      - name: Patch defconfig — enable KALLSYMS
+      - name: Patch defconfig
         run: |
           DEFCONFIG="arch/arm64/configs/vendor/alioth_defconfig"
+
           sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y\nCONFIG_KALLSYMS_ALL=y/' "$DEFCONFIG"
           grep -q 'CONFIG_KALLSYMS_ALL' "$DEFCONFIG" || echo 'CONFIG_KALLSYMS_ALL=y' >> "$DEFCONFIG"
-          grep KALLSYMS "$DEFCONFIG"
+
+          sed -i 's/CONFIG_RANDOMIZE_BASE=y/# CONFIG_RANDOMIZE_BASE is not set/' "$DEFCONFIG"
+          sed -i 's/CONFIG_RELOCATABLE=y/# CONFIG_RELOCATABLE is not set/' "$DEFCONFIG"
+
+          grep -E 'KALLSYMS|RANDOMIZE_BASE|RELOCATABLE' "$DEFCONFIG"
 
       - name: Install dependencies
         run: |
