@@ -40,15 +40,31 @@ jobs:
             https://github.com/KernelSU-Next/KPatch-Next kpatch-src
           cp kpatch-src/kernel/include/preset.h kpatch-src/tools/
           
-          echo ">>> ORIGINAL patch.c (around bad rela) <<<"
-          grep -n -B2 -A2 "bad rela" kpatch-src/tools/patch.c
-          
-          echo ">>> PATCHING KPTOOLS TO IGNORE BSS RELOCS <<<"
-          # Ищем "bad rela offset", захватываем следующую строку (где return) и меняем на continue;
-          sed -i '/bad rela offset/{N;s/return [^;]*;/continue;/}' kpatch-src/tools/patch.c
-          
-          echo ">>> MODIFIED patch.c (around bad rela) <<<"
-          grep -n -B2 -A2 "bad rela" kpatch-src/tools/patch.c
+          # Умный патчер на Python: сам найдет файл и заменит выход из цикла на continue
+          python3 -c "
+          import os
+          for root, dirs, files in os.walk('kpatch-src/tools'):
+              for file in files:
+                  if file.endswith('.c'):
+                      path = os.path.join(root, file)
+                      with open(path, 'r') as f:
+                          lines = f.readlines()
+                      changed = False
+                      for i in range(len(lines)):
+                          if 'bad rela' in lines[i]:
+                              print(f'>>> Found \"bad rela\" in {path} at line {i+1}')
+                              # Проверяем текущую и 2 следующие строки на наличие return или break
+                              for j in range(i, min(i+3, len(lines))):
+                                  orig = lines[j]
+                                  mod = orig.replace('return false;', 'continue;').replace('return -1;', 'continue;').replace('break;', 'continue;')
+                                  if orig != mod:
+                                      lines[j] = mod
+                                      changed = True
+                                      print(f'>>> Patched line {j+1}: {mod.strip()}')
+                      if changed:
+                          with open(path, 'w') as f:
+                              f.writelines(lines)
+          "
           
           make -C kpatch-src/tools -j$(nproc)
           cp kpatch-src/tools/kptools ./kptools
@@ -80,41 +96,41 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/bin
           cat << 'EOF' > $GITHUB_WORKSPACE/bin/make
           #!/bin/bash
-          if [[ "$*" == *"defconfig"* && "$*" != *"olddefconfig"* ]]; then
-            /usr/bin/make "$@"
+          if [[ \"\$*\" == *\"defconfig\"* && \"\$*\" != *\"olddefconfig\"* ]]; then
+            /usr/bin/make \"\$@\"
             
-            CONF="out/.config"
-            [ -f ".config" ] && CONF=".config"
+            CONF=\"out/.config\"
+            [ -f \".config\" ] && CONF=\".config\"
             
-            if [ -f "$CONF" ]; then
+            if [ -f \"\$CONF\" ]; then
               # Выключаем LTO
-              sed -i 's/CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' "$CONF"
-              sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' "$CONF"
-              sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' "$CONF"
+              sed -i 's/CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' \"\$CONF\"
+              sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' \"\$CONF\"
+              sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' \"\$CONF\"
               
               # Включаем KALLSYMS и KPROBES
-              sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' "$CONF"
-              sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/' "$CONF"
+              sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' \"\$CONF\"
+              sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/' \"\$CONF\"
               
-              echo 'CONFIG_LTO_NONE=y' >> "$CONF"
-              echo 'CONFIG_KALLSYMS=y' >> "$CONF"
-              echo 'CONFIG_KPROBES=y' >> "$CONF"
+              echo 'CONFIG_LTO_NONE=y' >> \"\$CONF\"
+              echo 'CONFIG_KALLSYMS=y' >> \"\$CONF\"
+              echo 'CONFIG_KPROBES=y' >> \"\$CONF\"
               
               ARGS=()
-              for arg in "$@"; do
-                if [[ "$arg" != *"defconfig"* ]]; then
-                  ARGS+=("$arg")
+              for arg in \"\$@\"; do
+                if [[ \"\$arg\" != *\"defconfig\"* ]]; then
+                  ARGS+=(\"\$arg\")
                 fi
               done
               
-              /usr/bin/make "${ARGS[@]}" olddefconfig
+              /usr/bin/make \"\${ARGS[@]}\" olddefconfig
               
-              echo ">>> VERIFYING KERNEL CONFIGS <<<"
-              grep -E 'CONFIG_KALLSYMS|CONFIG_LTO|CONFIG_KPROBES' "$CONF"
-              echo ">>> END OF VERIFICATION <<<"
+              echo \">>> VERIFYING KERNEL CONFIGS <<<\"
+              grep -E 'CONFIG_KALLSYMS|CONFIG_LTO|CONFIG_KPROBES' \"\$CONF\"
+              echo \">>> END OF VERIFICATION <<<\"
             fi
           else
-            /usr/bin/make "$@"
+            /usr/bin/make \"\$@\"
           fi
           EOF
           
@@ -128,7 +144,6 @@ jobs:
         run: |
           IMAGE="out/arch/arm64/boot/Image"
 
-          # Паддинг больше не нужен, так как kptools теперь просто проигнорирует выход за пределы файла
           ./kptools -p \
             -i "$IMAGE" \
             -k kpimg \
