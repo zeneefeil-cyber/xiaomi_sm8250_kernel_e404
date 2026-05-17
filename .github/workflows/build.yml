@@ -66,26 +66,41 @@ jobs:
 
       - name: Build kernel with config injection
         run: |
-          # Создаем обертку для make, чтобы пропатчить .config сразу после его создания (но до сборки)
           mkdir -p $GITHUB_WORKSPACE/bin
           cat << 'EOF' > $GITHUB_WORKSPACE/bin/make
           #!/bin/bash
           if [[ "$*" == *"defconfig"* ]]; then
             /usr/bin/make "$@"
-            echo ">>> INJECTING KERNEL CONFIGS <<<"
             CONF="out/.config"
             [ -f ".config" ] && CONF=".config"
             if [ -f "$CONF" ]; then
-              bash ./scripts/config --file "$CONF" --enable KALLSYMS --enable KALLSYMS_ALL --disable LTO_CLANG_THIN --disable LTO_CLANG --disable LTO --enable LTO_NONE
+              echo ">>> PATCHING $CONF <<<"
+              
+              # Выключаем LTO
+              sed -i 's/CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' "$CONF"
+              sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' "$CONF"
+              sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' "$CONF"
+              
+              # Включаем KALLSYMS и KPROBES
+              sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' "$CONF"
+              sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/' "$CONF"
+              
+              # Форсируем добавление на случай, если их не было в файле
+              echo 'CONFIG_LTO_NONE=y' >> "$CONF"
+              echo 'CONFIG_KALLSYMS=y' >> "$CONF"
+              echo 'CONFIG_KPROBES=y' >> "$CONF"
+              
               /usr/bin/make "$@" olddefconfig
+              
+              echo ">>> VERIFYING KERNEL CONFIGS <<<"
+              grep -E 'CONFIG_KALLSYMS|CONFIG_LTO|CONFIG_KPROBES' "$CONF"
+              echo ">>> END OF VERIFICATION <<<"
             fi
           else
             /usr/bin/make "$@"
           fi
           EOF
           chmod +x $GITHUB_WORKSPACE/bin/make
-          
-          # Подменяем системный make нашей оберткой
           export PATH="$GITHUB_WORKSPACE/bin:$PATH"
 
           chmod +x compile.sh
@@ -122,7 +137,6 @@ jobs:
             exit 1
           fi
 
-          # Передаем распухший файл прямо в AnyKernel3 без обрезки
           ZIP=$(ls out/RE404-*.zip | head -1)
           cp "${IMAGE}.patched" "../AnyKernel3/ALIOTH-Image"
           
