@@ -54,10 +54,6 @@ jobs:
             https://github.com/KernelSU-Next/KPatch-Next kpatch-src
           cp kpatch-src/kernel/include/preset.h kpatch-src/tools/
           
-          # Оставил диагностику на всякий случай
-          echo "=== bad rela context in patch.c ==="
-          grep -n -B5 -A5 "bad rela" kpatch-src/tools/patch.c
-          
           make -C kpatch-src/tools -j$(nproc)
           cp kpatch-src/tools/kptools ./kptools
           chmod +x kptools
@@ -120,7 +116,7 @@ jobs:
             exit 1
           fi
 
-          # Передаем распухший файл прямо в AnyKernel3
+          # Передаем распухший файл прямо в AnyKernel3 без обрезки
           ZIP=$(ls out/RE404-*.zip | head -1)
           cp "${IMAGE}.patched" "../AnyKernel3/ALIOTH-Image"
           
