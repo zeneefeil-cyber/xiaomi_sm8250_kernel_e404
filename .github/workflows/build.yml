@@ -1,0 +1,75 @@
+name: Build E404 Kernel (Alioth)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Patch defconfig — enable KALLSYMS
+        run: |
+          DEFCONFIG="arch/arm64/configs/vendor/alioth_defconfig"
+          sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y\nCONFIG_KALLSYMS_ALL=y/' "$DEFCONFIG"
+          grep -q 'CONFIG_KALLSYMS_ALL' "$DEFCONFIG" || echo 'CONFIG_KALLSYMS_ALL=y' >> "$DEFCONFIG"
+          grep KALLSYMS "$DEFCONFIG"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
+            python3 zip curl make ccache \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+
+      - name: Clone AnyKernel3
+        run: git clone --depth=1 https://github.com/kvsnr113/AnyKernel3 ../AnyKernel3
+
+      - name: Download LLVM 22.1.5
+        run: |
+          mkdir -p ../toolchains/llvm-clang
+          curl -Lo clang.tar.xz \
+            https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.5/clang+llvm-22.1.5-x86_64-linux-gnu.tar.xz
+          tar -xf clang.tar.xz --strip-components=1 -C ../toolchains/llvm-clang
+          rm clang.tar.xz
+
+      - name: Create Telegram config
+        run: |
+          cat > ../telegram_api << 'EOF'
+          BOT_TOKEN=fake
+          GROUP_ID=-1
+          CHANNEL_ID=-1
+          PRIVATE_ID=-1
+          EOF
+
+      - name: Setup ccache
+        uses: actions/cache@v4
+        with:
+          path: ../ccache
+          key: ccache-alioth-${{ github.sha }}
+          restore-keys: ccache-alioth-
+
+      - name: Build
+        run: |
+          chmod +x compile.sh
+          ./compile.sh alioth llvm
+
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: E404-Alioth-${{ github.run_number }}
+          path: out/*.zip
+
+      - name: Upload log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: out/kernel_compile.log
