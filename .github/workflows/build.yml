@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev \
-            python3 zip curl make ccache cmake build-essential \
+            python3 zip curl make ccache build-essential \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
@@ -52,28 +52,15 @@ jobs:
           git clone --depth=1 \
             https://github.com/KernelSU-Next/KPatch-Next kpatch-src
 
-          # Патч: заменяем проверку границ image_size → kernel_size
-          # чтобы BSS-записи в rela таблице не пропускались
-          grep -n "bad rela offset\|image_size" kpatch-src/tools/patch.c | head -20
+          cp kpatch-src/kernel/include/preset.h kpatch-src/tools/
 
           sed -i 's/kimg->image_size/kimg->kernel_size/g' kpatch-src/tools/patch.c
-
-          echo "--- Patched lines ---"
+          echo "--- Patched lines in patch.c ---"
           grep -n "kernel_size\|image_size" kpatch-src/tools/patch.c | head -20
 
-          # Сборка
-          cd kpatch-src
-          if [ -f CMakeLists.txt ]; then
-            cmake -B build -DCMAKE_BUILD_TYPE=Release
-            cmake --build build -j$(nproc)
-            find build -name "kptools*" -type f | head -5
-            cp $(find build -name "kptools" -type f | head -1) ../kptools
-          else
-            make -C tools -j$(nproc) || make -j$(nproc)
-            cp kptools ../kptools 2>/dev/null || find . -name "kptools" | head -1 | xargs -I{} cp {} ../kptools
-          fi
+          make -C kpatch-src/tools -j$(nproc)
 
-          cd ..
+          cp kpatch-src/tools/kptools ./kptools
           chmod +x kptools
           ./kptools --version
 
@@ -121,7 +108,6 @@ jobs:
             exit 1
           fi
 
-          # Заменяем Image в AnyKernel3 zip на пропатченный
           ZIP=$(ls out/RE404-*.zip | head -1)
           cp "${IMAGE}.patched" "../AnyKernel3/ALIOTH-Image"
           cd ../AnyKernel3
