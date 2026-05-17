@@ -26,6 +26,7 @@ jobs:
           sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' "$DEFCONFIG"
           sed -i 's/# CONFIG_LTO_NONE is not set/CONFIG_LTO_NONE=y/' "$DEFCONFIG"
 
+          # RANDOMIZE_BASE и RELOCATABLE оставляем — нужны для rela таблицы
           grep -E 'KALLSYMS|RANDOMIZE_BASE|RELOCATABLE|LTO' "$DEFCONFIG"
 
       - name: Install dependencies
@@ -47,19 +48,17 @@ jobs:
           tar -xf clang.tar.xz --strip-components=1 -C ../toolchains/llvm-clang
           rm clang.tar.xz
 
-      - name: Build patched kptools from source
+      - name: Build kptools from source
         run: |
           git clone --depth=1 \
             https://github.com/KernelSU-Next/KPatch-Next kpatch-src
-
           cp kpatch-src/kernel/include/preset.h kpatch-src/tools/
-
-          sed -i 's/kimg->image_size/kimg->kernel_size/g' kpatch-src/tools/patch.c
-          echo "--- Patched lines in patch.c ---"
-          grep -n "kernel_size\|image_size" kpatch-src/tools/patch.c | head -20
-
+          
+          # Оставил диагностику на всякий случай
+          echo "=== bad rela context in patch.c ==="
+          grep -n -B5 -A5 "bad rela" kpatch-src/tools/patch.c
+          
           make -C kpatch-src/tools -j$(nproc)
-
           cp kpatch-src/tools/kptools ./kptools
           chmod +x kptools
           ./kptools --version
@@ -95,8 +94,21 @@ jobs:
           IMAGE="out/arch/arm64/boot/Image"
           cp "$IMAGE" "${IMAGE}.ori"
 
+          KERNEL_SIZE=$(python3 -c "
+          import struct
+          with open('${IMAGE}.ori', 'rb') as f:
+              f.seek(16)
+              print(struct.unpack('<Q', f.read(8))[0])
+          ")
+          
+          echo "Virtual size extracted: $KERNEL_SIZE"
+
+          # Padding Image до kernel_size
+          cp "${IMAGE}.ori" "${IMAGE}.padded"
+          truncate -s "$KERNEL_SIZE" "${IMAGE}.padded"
+
           ./kptools -p \
-            -i "${IMAGE}.ori" \
+            -i "${IMAGE}.padded" \
             -k kpimg \
             -o "${IMAGE}.patched" \
             -M ci/ditpro.kpm \
@@ -108,12 +120,13 @@ jobs:
             exit 1
           fi
 
+          # Передаем распухший файл прямо в AnyKernel3
           ZIP=$(ls out/RE404-*.zip | head -1)
           cp "${IMAGE}.patched" "../AnyKernel3/ALIOTH-Image"
+          
           cd ../AnyKernel3
           zip -u "${GITHUB_WORKSPACE}/${ZIP}" ALIOTH-Image
           cd "${GITHUB_WORKSPACE}"
-
           echo "KPM embedded OK"
 
       - name: Upload artifact
