@@ -31,13 +31,14 @@ jobs:
       - name: Clone AnyKernel3
         run: git clone --depth=1 https://github.com/kvsnr113/AnyKernel3 ../AnyKernel3
 
-      - name: Download LLVM 22.1.5
+      - name: Download LLVM 22.1.4
         run: |
           mkdir -p ../toolchains/llvm-clang
           curl -Lo clang.tar.xz \
-            https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.5/clang+llvm-22.1.5-x86_64-linux-gnu.tar.xz
+            https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.4/LLVM-22.1.4-Linux-X64.tar.xz
           tar -xf clang.tar.xz --strip-components=1 -C ../toolchains/llvm-clang
           rm clang.tar.xz
+          ../toolchains/llvm-clang/bin/clang --version
 
       - name: Create Telegram config
         run: |
