@@ -1,6 +1,7 @@
 name: Build E404 Kernel (Alioth)
 
 on:
+  push:
   workflow_dispatch:
 
 jobs:
@@ -69,37 +70,53 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/bin
           cat << 'EOF' > $GITHUB_WORKSPACE/bin/make
           #!/bin/bash
-          if [[ "$*" == *"defconfig"* ]]; then
+          # Если это генерация конфига (и не валидация olddefconfig)
+          if [[ "$*" == *"defconfig"* && "$*" != *"olddefconfig"* ]]; then
+            # 1. Генерируем дефолтный конфиг
             /usr/bin/make "$@"
+            
             CONF="out/.config"
             [ -f ".config" ] && CONF=".config"
+            
             if [ -f "$CONF" ]; then
               echo ">>> PATCHING $CONF <<<"
               
-              # Выключаем LTO
+              # 2. Выключаем LTO
               sed -i 's/CONFIG_LTO_CLANG_THIN=y/# CONFIG_LTO_CLANG_THIN is not set/' "$CONF"
               sed -i 's/CONFIG_LTO_CLANG=y/# CONFIG_LTO_CLANG is not set/' "$CONF"
               sed -i 's/CONFIG_LTO=y/# CONFIG_LTO is not set/' "$CONF"
               
-              # Включаем KALLSYMS и KPROBES
+              # 3. Включаем KALLSYMS и KPROBES
               sed -i 's/# CONFIG_KALLSYMS is not set/CONFIG_KALLSYMS=y/' "$CONF"
               sed -i 's/# CONFIG_KPROBES is not set/CONFIG_KPROBES=y/' "$CONF"
               
-              # Форсируем добавление на случай, если их не было в файле
+              # Добиваем в конец для верности
               echo 'CONFIG_LTO_NONE=y' >> "$CONF"
               echo 'CONFIG_KALLSYMS=y' >> "$CONF"
+              echo 'CONFIG_KALLSYMS_ALL=y' >> "$CONF"
               echo 'CONFIG_KPROBES=y' >> "$CONF"
               
-              /usr/bin/make "$@" olddefconfig
+              # 4. УБИРАЕМ alioth_defconfig из аргументов, чтобы не перезаписать файл
+              ARGS=()
+              for arg in "$@"; do
+                if [[ "$arg" != *"defconfig"* ]]; then
+                  ARGS+=("$arg")
+                fi
+              done
+              
+              # 5. Валидируем изменённый конфиг
+              /usr/bin/make "${ARGS[@]}" olddefconfig
               
               echo ">>> VERIFYING KERNEL CONFIGS <<<"
               grep -E 'CONFIG_KALLSYMS|CONFIG_LTO|CONFIG_KPROBES' "$CONF"
               echo ">>> END OF VERIFICATION <<<"
             fi
           else
+            # Обычная сборка ядра
             /usr/bin/make "$@"
           fi
           EOF
+          
           chmod +x $GITHUB_WORKSPACE/bin/make
           export PATH="$GITHUB_WORKSPACE/bin:$PATH"
 
